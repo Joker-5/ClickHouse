@@ -8,6 +8,7 @@ namespace DB
 namespace ErrorCodes
 {
     extern const int NOT_ENOUGH_SPACE;
+    extern const int LOGICAL_ERROR;
 }
 
 namespace
@@ -51,6 +52,8 @@ void WriteBufferToFileSegment::nextImpl()
     {
         LOG_WARNING(&Poco::Logger::get("WriteBufferToFileSegment"), "Failed to write to the underlying buffer ({})", file_segment->getInfoForLog());
         file_segment->completeWithState(FileSegment::State::PARTIALLY_DOWNLOADED_NO_CONTINUATION);
+        if (file_segment->isDownloader())
+            file_segment->completePartAndResetDownloader();
         throw;
     }
     LOG_WARNING(&Poco::Logger::get("WriteBufferToFileSegment"), "Written {} bytes", bytes_to_write);

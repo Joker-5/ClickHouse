@@ -620,8 +620,6 @@ static Block generateBlock(size_t size = 0)
     }
 
     block.insert(column);
-
-    LOG_DEBUG(&Poco::Logger::get("FileCacheTest"), "generated block {} bytes", block.bytes());
     return block;
 }
 
@@ -640,15 +638,15 @@ static size_t readAllTemporaryData(TemporaryFileStream & stream)
 TEST_F(FileCacheTest, temporaryData)
 {
     DB::FileCacheSettings settings;
-    settings.max_size = 10240;
-    settings.max_file_segment_size = 1024;
+    settings.max_size = 10_KiB;
+    settings.max_file_segment_size = 1_KiB;
 
     DB::FileCache file_cache(cache_base_path, settings);
     file_cache.initialize();
 
     auto tmp_data_scope = std::make_shared<TemporaryDataOnDiskScope>(nullptr, &file_cache, 0);
 
-    auto some_data_holder = file_cache.getOrSet(file_cache.hash("some_data"), 0, 1024 * 5, CreateFileSegmentSettings{});
+    auto some_data_holder = file_cache.getOrSet(file_cache.hash("some_data"), 0, 5_KiB, CreateFileSegmentSettings{});
 
     {
         auto segments = fromHolder(some_data_holder);
@@ -681,21 +679,30 @@ TEST_F(FileCacheTest, temporaryData)
 
         size_t used_size_before_attempt = file_cache.getUsedCacheSize();
         /// data can't be evicted because it is still held by `some_data_holder`
-        // ASSERT_THROW(stream.write(generateBlock(1000)), DB::Exception);
+        ASSERT_THROW({
+            stream.write(generateBlock(2000));
+            stream.flush();
+        }, DB::Exception);
 
         ASSERT_EQ(file_cache.getUsedCacheSize(), used_size_before_attempt);
+    }
+    {
+        auto tmp_data = std::make_unique<TemporaryDataOnDisk>(tmp_data_scope);
+        auto & stream = tmp_data->createStream(generateBlock());
+
+        ASSERT_GT(stream.write(generateBlock(100)), 0);
 
         some_data_holder.reset();
 
-        stream.write(generateBlock(1011));
+        stream.write(generateBlock(2000));
 
         auto stat = stream.finishWriting();
 
         ASSERT_TRUE(fs::exists(stream.getPath()));
         ASSERT_GT(fs::file_size(stream.getPath()), 100);
 
-        ASSERT_EQ(stat.num_rows, 1111);
-        ASSERT_EQ(readAllTemporaryData(stream), 1111);
+        ASSERT_EQ(stat.num_rows, 2100);
+        ASSERT_EQ(readAllTemporaryData(stream), 2100);
 
         size_used_with_temporary_data = file_cache.getUsedCacheSize();
         segments_used_with_temporary_data = file_cache.getFileSegmentsNum();

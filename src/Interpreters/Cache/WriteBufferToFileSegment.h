@@ -1,3 +1,5 @@
+#pragma once
+
 #include <Interpreters/Cache/FileSegment.h>
 
 #include <IO/WriteBufferFromFileDecorator.h>

@@ -131,6 +131,8 @@ public:
     TemporaryFileStream(FileSegmentsHolder && segments_, const Block & header_, TemporaryDataOnDisk * parent_);
 
     size_t write(const Block & block);
+    void flush();
+
     Stat finishWriting();
     bool isWriteFinished() const;
 

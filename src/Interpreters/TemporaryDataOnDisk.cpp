@@ -137,6 +137,16 @@ struct TemporaryFileStream::OutputWriter
         return written_bytes;
     }
 
+    void flush()
+    {
+        if (finalized)
+            throw Exception("Cannot flush finalized stream", ErrorCodes::LOGICAL_ERROR);
+
+        out_compressed_buf.next();
+        out_buf->next();
+        out_writer.flush();
+    }
+
     void finalize()
     {
         if (finalized)
@@ -148,13 +158,7 @@ struct TemporaryFileStream::OutputWriter
 
         out_writer.flush();
         out_compressed_buf.finalize();
-
-        if (auto * file_buf = dynamic_cast<WriteBufferFromFile *>(out_buf.get()))
-            file_buf->finalize();
-        else if (auto * segment_buf = dynamic_cast<WriteBufferToFileSegment *>(out_buf.get()))
-            segment_buf->finalize();
-        else
-            throw Exception(ErrorCodes::LOGICAL_ERROR, "Unknown WriteBuffer type");
+        out_buf->finalize();
     }
 
     ~OutputWriter()
@@ -236,6 +240,14 @@ size_t TemporaryFileStream::write(const Block & block)
     return bytes_written;
 }
 
+void TemporaryFileStream::flush()
+{
+    if (!out_writer)
+        throw Exception("Writing has been finished", ErrorCodes::LOGICAL_ERROR);
+
+    out_writer->flush();
+}
+
 TemporaryFileStream::Stat TemporaryFileStream::finishWriting()
 {
     if (isWriteFinished())
@@ -308,15 +320,6 @@ bool TemporaryFileStream::isEof() const
 
 void TemporaryFileStream::release()
 {
-    if (file)
-    {
-        file.reset();
-        parent->deltaAllocAndCheck(-stat.compressed_size, -stat.uncompressed_size);
-    }
-
-    if (!segment_holder.empty())
-        segment_holder.reset();
-
     if (in_reader)
         in_reader.reset();
 
@@ -325,6 +328,15 @@ void TemporaryFileStream::release()
         out_writer->finalize();
         out_writer.reset();
     }
+
+    if (file)
+    {
+        file.reset();
+        parent->deltaAllocAndCheck(-stat.compressed_size, -stat.uncompressed_size);
+    }
+
+    if (!segment_holder.empty())
+        segment_holder.reset();
 }
 
 String TemporaryFileStream::getPath() const
