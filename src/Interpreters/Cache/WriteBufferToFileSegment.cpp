@@ -40,7 +40,7 @@ void WriteBufferToFileSegment::nextImpl()
 
     bool ok = file_segment->reserve(bytes_to_write);
     if (!ok)
-        throw Exception(ErrorCodes::NOT_ENOUGH_SPACE, "Failed to reserve space for the file segment. ({})", file_segment->getInfoForLog());
+        throw Exception(ErrorCodes::NOT_ENOUGH_SPACE, "Failed to reserve space for the file cache ({})", file_segment->getInfoForLog());
 
     try
     {
