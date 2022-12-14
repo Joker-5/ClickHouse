@@ -488,28 +488,29 @@ size_t HashJoin::getTotalRowCount() const
         }
     }
 
-
     return res;
 }
 
 size_t HashJoin::getTotalByteCount() const
 {
     size_t res = 0;
+    for (const auto & block : data->blocks)
+        res += block.allocatedBytes();
 
-    if (data->type == Type::CROSS)
+    res += data->pool.size();
+
+    for (const auto & nullmap : data->blocks_nullmaps)
     {
-        for (const auto & block : data->blocks)
-            res += block.bytes();
+        res += nullmap.second->allocatedBytes();
     }
-    else
+
+    if (data->type != Type::CROSS)
     {
         for (const auto & map : data->maps)
         {
             joinDispatch(kind, strictness, map, [&](auto, auto, auto & map_) { res += map_.getTotalByteCountImpl(data->type); });
         }
-        res += data->pool.size();
     }
-
     return res;
 }
 
@@ -1680,7 +1681,7 @@ void HashJoin::checkTypesOfKeys(const Block & block) const
 
 void HashJoin::joinBlock(Block & block, ExtraBlockPtr & not_processed)
 {
-    if (data->released)
+    if (!data || data->released)
         throw Exception(ErrorCodes::LOGICAL_ERROR, "Cannot join after data has been released");
 
     for (const auto & onexpr : table_join->getClauses())
@@ -1717,6 +1718,16 @@ void HashJoin::joinBlock(Block & block, ExtraBlockPtr & not_processed)
         else
             throw Exception(ErrorCodes::LOGICAL_ERROR, "Wrong JOIN combination: {} {}", strictness, kind);
     }
+}
+
+HashJoin::~HashJoin()
+{
+    if (!data || data->released)
+    {
+        LOG_DEBUG(log, "Join data has been released");
+        return;
+    }
+    LOG_DEBUG(log, "Join data is being destroyed, {} bytes and {} rows in hash table", getTotalByteCount(), getTotalRowCount());
 }
 
 template <typename Mapped>
@@ -1757,7 +1768,6 @@ struct AdderNonJoined
     }
 };
 
-
 /// Stream from not joined earlier rows of the right table.
 /// Based on:
 ///   - map offsetInternal saved in used_flags for single disjuncts
@@ -1768,7 +1778,10 @@ class NotJoinedHash final : public NotJoinedBlocks::RightColumnsFiller
 public:
     NotJoinedHash(const HashJoin & parent_, UInt64 max_block_size_)
         : parent(parent_), max_block_size(max_block_size_), current_block_start(0)
-    {}
+    {
+        if (parent.data == nullptr || parent.data->released)
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "Cannot join after data has been released");
+    }
 
     Block getEmptyBlock() override { return parent.savedBlockSample().cloneEmpty(); }
 
@@ -1965,7 +1978,6 @@ IBlocksStreamPtr HashJoin::getNonJoinedBlocks(const Block & left_sample_block,
         size_t left_columns_count = left_sample_block.columns();
         auto non_joined = std::make_unique<NotJoinedHash<true>>(*this, max_block_size);
         return std::make_unique<NotJoinedBlocks>(std::move(non_joined), result_sample_block, left_columns_count, *table_join);
-
     }
     else
     {
@@ -1997,6 +2009,9 @@ void HashJoin::reuseJoinedData(const HashJoin & join)
 BlocksList HashJoin::releaseJoinedBlocks()
 {
     BlocksList right_blocks = std::move(data->blocks);
+    data->maps.clear();
+    data->blocks_nullmaps.clear();
+
     data->released = true;
     BlocksList restored_blocks;
 
@@ -2025,6 +2040,7 @@ BlocksList HashJoin::releaseJoinedBlocks()
         restored_blocks.emplace_back(std::move(restored_block));
     }
 
+    data.reset();
     return restored_blocks;
 }
 
