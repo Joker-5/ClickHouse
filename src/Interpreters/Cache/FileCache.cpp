@@ -1216,16 +1216,6 @@ size_t FileCache::getAvailableCacheSizeUnlocked(std::lock_guard<std::mutex> & ca
     return max_size - getUsedCacheSizeUnlocked(cache_lock);
 }
 
-size_t FileCache::getTotalMaxSize() const
-{
-    return max_size;
-}
-
-size_t FileCache::getTotalMaxElements() const
-{
-    return max_element_size;
-}
-
 size_t FileCache::getFileSegmentsNum() const
 {
     std::lock_guard cache_lock(mutex);
